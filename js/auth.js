@@ -30,6 +30,7 @@ class AuthManager {
         const emailSignInBtn = document.getElementById('email-signin-btn');
         const toggleAuthBtn = document.getElementById('toggle-auth-method');
         const emailSignInForm = document.getElementById('email-signin-form');
+        const logoutBtn = document.getElementById('logout-btn');
 
         if (googleSignInBtn) {
             googleSignInBtn.addEventListener('click', () => this.signInWithGoogle());
@@ -41,6 +42,10 @@ class AuthManager {
 
         if (toggleAuthBtn) {
             toggleAuthBtn.addEventListener('click', () => this.toggleAuthMethod());
+        }
+
+        if (logoutBtn) {
+            logoutBtn.addEventListener('click', () => this.handleSignOut());
         }
 
         if (emailSignInForm) {
@@ -177,13 +182,105 @@ class AuthManager {
         }
     }
 
+    async handleSignOut() {
+        try {
+            const modal = document.getElementById('modal');
+            const modalTitle = document.getElementById('modal-title');
+            const modalMessage = document.getElementById('modal-message');
+            const modalConfirm = document.getElementById('modal-confirm');
+            const modalCancel = document.getElementById('modal-cancel');
+
+            modalTitle.textContent = '🚪 Sign Out';
+            modalMessage.innerHTML = `
+                <p>Are you sure you want to sign out?</p>
+                <p class="small">You'll need to sign in again to access account management options.</p>
+            `;
+
+            modalConfirm.textContent = 'Sign Out';
+            modalConfirm.classList.remove('hidden');
+            modal.classList.remove('hidden');
+
+            // Handle confirmation
+            const handleConfirm = async () => {
+                modalConfirm.removeEventListener('click', handleConfirm);
+                modalCancel.removeEventListener('click', handleCancel);
+                modal.classList.add('hidden');
+                
+                await this.signOut();
+            };
+
+            const handleCancel = () => {
+                modalConfirm.removeEventListener('click', handleConfirm);
+                modalCancel.removeEventListener('click', handleCancel);
+                modal.classList.add('hidden');
+            };
+
+            modalConfirm.addEventListener('click', handleConfirm);
+            modalCancel.addEventListener('click', handleCancel);
+
+        } catch (error) {
+            console.error('Sign out dialog error:', error);
+            // Fallback - sign out directly
+            await this.signOut();
+        }
+    }
+
     async signOut() {
         try {
+            this.showLoading('Signing out...');
+            
+            // Clear any cached data
+            this.currentUser = null;
+            
+            // Sign out from Firebase
             await auth.signOut();
-            console.log('User signed out');
+            
+            console.log('User signed out successfully');
+            
+            // Clear form fields
+            this.clearFormFields();
+            
+            // Hide loading and show success message briefly
+            this.hideLoading();
+            Utils.showToast('Signed out successfully', 'success', 2000);
+            
         } catch (error) {
             console.error('Sign-out error:', error);
+            this.hideLoading();
             this.showError('Failed to sign out. Please try again.');
+        }
+    }
+
+    clearFormFields() {
+        const emailField = document.getElementById('email');
+        const passwordField = document.getElementById('password');
+        
+        if (emailField) emailField.value = '';
+        if (passwordField) passwordField.value = '';
+    }
+
+    updateUserInfo(user) {
+        // Add user email info below the name
+        const userInfo = document.querySelector('.user-info');
+        if (userInfo && user) {
+            // Remove existing user email if present
+            const existingEmail = userInfo.querySelector('.user-email');
+            if (existingEmail) {
+                existingEmail.remove();
+            }
+
+            // Add user email
+            const emailElement = document.createElement('p');
+            emailElement.className = 'user-email';
+            emailElement.style.fontSize = '14px';
+            emailElement.style.color = 'var(--text-secondary)';
+            emailElement.style.margin = '4px 0 16px 0';
+            emailElement.textContent = user.email;
+            
+            const nameElement = userInfo.querySelector('h2');
+            if (nameElement) {
+                nameElement.insertAdjacentElement('afterend', emailElement);
+            }
         }
     }
 
@@ -205,6 +302,9 @@ class AuthManager {
             if (userNameSpan) {
                 userNameSpan.textContent = user.displayName || user.email;
             }
+
+            // Update user info display
+            this.updateUserInfo(user);
 
             // Load user data summary
             if (window.accountManager) {
