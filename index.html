@@ -56,10 +56,37 @@
                     <h2>🔐 Sign In to Your Account</h2>
                     <p>Please sign in to access your account management options.</p>
                     
-                    <button id="google-signin-btn" class="btn btn-google">
-                        <img src="https://developers.google.com/identity/images/g-logo.png" alt="Google" class="google-icon">
-                        Sign in with Google
-                    </button>
+                    <!-- Google Sign-In Section -->
+                    <div id="google-auth-section">
+                        <button id="google-signin-btn" class="btn btn-google">
+                            <img src="https://developers.google.com/identity/images/g-logo.png" alt="Google" class="google-icon">
+                            Sign in with Google
+                        </button>
+                    </div>
+
+                    <!-- Email/Password Sign-In Section -->
+                    <div id="email-auth-section" class="hidden">
+                        <form id="email-signin-form" class="auth-form">
+                            <div class="form-group">
+                                <label for="email">Email Address</label>
+                                <input type="email" id="email" name="email" required placeholder="Enter your email">
+                            </div>
+                            <div class="form-group">
+                                <label for="password">Password</label>
+                                <input type="password" id="password" name="password" required placeholder="Enter your password">
+                            </div>
+                            <button type="submit" id="email-signin-btn" class="btn btn-primary full-width">
+                                Sign In
+                            </button>
+                        </form>
+                    </div>
+
+                    <!-- Toggle between auth methods -->
+                    <div class="auth-toggle">
+                        <button id="toggle-auth-method" class="btn btn-link">
+                            Use Email/Password Instead
+                        </button>
+                    </div>
                     
                     <div id="auth-error" class="error-message hidden"></div>
                 </div>
