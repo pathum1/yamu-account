@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>YAMU Account Management</title>
+    <link rel="stylesheet" href="css/styles.css">
+    <link rel="icon" type="image/png" href="images/yamu-logo.png">
+    
+    <!-- Firebase SDK -->
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore-compat.js"></script>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <div class="logo-container">
+                <img src="images/yamu-logo.png" alt="YAMU" class="logo">
+                <h1>YAMU Account Management</h1>
+            </div>
+        </header>
+
+        <main>
+            <!-- Loading State -->
+            <div id="loading" class="loading-container">
+                <div class="spinner"></div>
+                <p>Loading your account options...</p>
+            </div>
+
+            <!-- App Detection Section -->
+            <div id="app-detection" class="section hidden">
+                <div class="card">
+                    <h2>🚗 Do you have the YAMU app installed?</h2>
+                    <p>We can open your account settings directly in the app for the best experience.</p>
+                    
+                    <div class="button-group">
+                        <button id="try-app-btn" class="btn btn-primary">
+                            📱 Open in YAMU App
+                        </button>
+                        <button id="use-web-btn" class="btn btn-secondary">
+                            🌐 Continue on Web
+                        </button>
+                    </div>
+                    
+                    <div id="app-check-status" class="status-message hidden">
+                        <p>Trying to open the YAMU app...</p>
+                        <p class="small">If the app doesn't open in a few seconds, you can continue on the web.</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Authentication Section -->
+            <div id="auth-section" class="section hidden">
+                <div class="card">
+                    <h2>🔐 Sign In to Your Account</h2>
+                    <p>Please sign in to access your account management options.</p>
+                    
+                    <button id="google-signin-btn" class="btn btn-google">
+                        <img src="https://developers.google.com/identity/images/g-logo.png" alt="Google" class="google-icon">
+                        Sign in with Google
+                    </button>
+                    
+                    <div id="auth-error" class="error-message hidden"></div>
+                </div>
+            </div>
+
+            <!-- Account Management Options -->
+            <div id="account-options" class="section hidden">
+                <div class="card">
+                    <h2>👤 Hello, <span id="user-name"></span>!</h2>
+                    <p>Manage your YAMU account and data below.</p>
+                    
+                    <div class="option-cards">
+                        <div class="option-card">
+                            <div class="option-icon">📊</div>
+                            <h3>Export Your Data</h3>
+                            <p>Download a complete copy of your YAMU data including trips, friends, and achievements.</p>
+                            <button id="export-data-btn" class="btn btn-secondary">Export Data</button>
+                        </div>
+                        
+                        <div class="option-card danger">
+                            <div class="option-icon">🗑️</div>
+                            <h3>Delete Your Account</h3>
+                            <p>Permanently delete your YAMU account and all associated data. This action cannot be undone.</p>
+                            <button id="delete-account-btn" class="btn btn-danger">Delete Account</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Data Summary -->
+            <div id="data-summary" class="section hidden">
+                <div class="card">
+                    <h3>📋 Your Data Summary</h3>
+                    <div id="summary-content" class="data-summary">
+                        <!-- Will be populated by JavaScript -->
+                    </div>
+                </div>
+            </div>
+        </main>
+
+        <footer>
+            <div class="footer-links">
+                <a href="privacy.html">Privacy Policy</a>
+                <a href="mailto:support@yamu.app">Support</a>
+                <a href="https://yamu.app">Back to YAMU</a>
+            </div>
+            <p>&copy; 2024 YAMU. All rights reserved.</p>
+        </footer>
+    </div>
+
+    <!-- Success/Error Modal -->
+    <div id="modal" class="modal hidden">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3 id="modal-title"></h3>
+                <span id="modal-close" class="close">&times;</span>
+            </div>
+            <div class="modal-body">
+                <div id="modal-message"></div>
+            </div>
+            <div class="modal-footer">
+                <button id="modal-confirm" class="btn btn-primary hidden">Confirm</button>
+                <button id="modal-cancel" class="btn btn-secondary">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Scripts -->
+    <script src="js/firebase-config.js"></script>
+    <script src="js/utils.js"></script>
+    <script src="js/app-detector.js"></script>
+    <script src="js/auth.js"></script>
+    <script src="js/account-manager.js"></script>
+    <script src="js/main.js"></script>
+</body>
+</html>
