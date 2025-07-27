@@ -13,7 +13,7 @@ A GitHub Pages hosted solution for YAMU app account management, providing Google
 
 ## Live Demo
 
-The portal is live at: `https://pathum1.github.io/yamu-account-management`
+The portal is live at: `https://pathum1.github.io/yamu-account/`
 
 ## Google Play Compliance
 
@@ -28,7 +28,7 @@ This portal meets Google Play's account deletion requirements by providing:
 
 ### 1. Repository Setup
 
-1. Create a new GitHub repository named `yamu-account-management`
+1. Create a new GitHub repository named `yamu-account` (or use existing repository)
 2. Copy all files from this directory to the new repository
 3. Enable GitHub Pages in repository settings:
    - Go to Settings → Pages
@@ -43,7 +43,7 @@ The portal uses your existing Firebase project (`yamu-app-1`). No additional set
 ### 3. App Store Integration
 
 Update the Google Play Console with your account deletion URL:
-- **Account deletion URL**: `https://pathum1.github.io/yamu-account-management`
+- **Account deletion URL**: `https://pathum1.github.io/yamu-account/`
 - **Data safety form**: Complete with this URL as the deletion option
 
 ### 4. Deep Linking (Optional Enhancement)
@@ -61,7 +61,7 @@ if (link.path.startsWith('/account/delete')) {
 ## File Structure
 
 ```
-yamu-account-management/
+yamu-account/
 ├── index.html              # Main account management interface
 ├── privacy.html            # Privacy policy page
 ├── css/
