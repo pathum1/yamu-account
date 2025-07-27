@@ -22,6 +22,9 @@ const firestore = firebase.firestore();
 const googleProvider = new firebase.auth.GoogleAuthProvider();
 googleProvider.addScope('profile');
 googleProvider.addScope('email');
+googleProvider.setCustomParameters({
+    prompt: 'select_account'
+});
 
 // Export for use in other modules
 window.firebaseConfig = firebaseConfig;
