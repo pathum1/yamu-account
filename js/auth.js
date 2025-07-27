@@ -229,16 +229,30 @@ class AuthManager {
         try {
             this.showLoading('Signing out...');
             
-            // Clear any cached data
+            // Clear any cached data FIRST
             this.currentUser = null;
+            
+            // Immediately hide user-specific sections and clear data
+            const accountOptions = document.getElementById('account-options');
+            const dataSummary = document.getElementById('data-summary');
+            
+            if (accountOptions) {
+                accountOptions.classList.add('hidden');
+            }
+            if (dataSummary) {
+                dataSummary.classList.add('hidden');
+            }
+            
+            // Clear user info immediately
+            this.clearUserInfo();
+            
+            // Clear form fields
+            this.clearFormFields();
             
             // Sign out from Firebase
             await auth.signOut();
             
             console.log('User signed out successfully');
-            
-            // Clear form fields
-            this.clearFormFields();
             
             // Hide loading and show success message briefly
             this.hideLoading();
