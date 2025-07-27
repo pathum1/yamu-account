@@ -284,11 +284,32 @@ class AuthManager {
         }
     }
 
+    clearUserInfo() {
+        // Clear user name display
+        const userNameSpan = document.getElementById('user-name');
+        if (userNameSpan) {
+            userNameSpan.textContent = '';
+        }
+
+        // Remove user email
+        const existingEmail = document.querySelector('.user-email');
+        if (existingEmail) {
+            existingEmail.remove();
+        }
+
+        // Clear data summary content
+        const summaryContent = document.getElementById('summary-content');
+        if (summaryContent) {
+            summaryContent.innerHTML = '';
+        }
+    }
+
     updateUI(user) {
         const loadingSection = document.getElementById('loading');
         const appDetectionSection = document.getElementById('app-detection');
         const authSection = document.getElementById('auth-section');
         const accountOptions = document.getElementById('account-options');
+        const dataSummary = document.getElementById('data-summary');
         const userNameSpan = document.getElementById('user-name');
 
         // Hide loading
@@ -311,8 +332,16 @@ class AuthManager {
                 window.accountManager.loadUserDataSummary();
             }
         } else {
-            // User is not signed in
+            // User is not signed in - hide all user-specific content
             accountOptions.classList.add('hidden');
+            
+            // Hide data summary section
+            if (dataSummary) {
+                dataSummary.classList.add('hidden');
+            }
+            
+            // Clear user info
+            this.clearUserInfo();
             
             // Show app detection first, then auth if needed
             if (!appDetectionSection.classList.contains('hidden')) {
