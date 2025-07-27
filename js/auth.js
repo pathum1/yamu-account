@@ -12,34 +12,144 @@ class AuthManager {
             this.currentUser = user;
             this.updateUI(user);
         });
+
+        // Handle redirect result for mobile Google Sign-In
+        auth.getRedirectResult().then((result) => {
+            if (result.user) {
+                console.log('User signed in via redirect:', result.user.email);
+                this.ensureUserProfile(result.user).catch(console.error);
+            }
+        }).catch((error) => {
+            console.error('Redirect sign-in error:', error);
+            this.showError(this.getErrorMessage(error));
+        });
     }
 
     setupEventListeners() {
         const googleSignInBtn = document.getElementById('google-signin-btn');
+        const emailSignInBtn = document.getElementById('email-signin-btn');
+        const toggleAuthBtn = document.getElementById('toggle-auth-method');
+        const emailSignInForm = document.getElementById('email-signin-form');
+
         if (googleSignInBtn) {
             googleSignInBtn.addEventListener('click', () => this.signInWithGoogle());
+        }
+
+        if (emailSignInBtn) {
+            emailSignInBtn.addEventListener('click', () => this.signInWithEmail());
+        }
+
+        if (toggleAuthBtn) {
+            toggleAuthBtn.addEventListener('click', () => this.toggleAuthMethod());
+        }
+
+        if (emailSignInForm) {
+            emailSignInForm.addEventListener('submit', (e) => {
+                e.preventDefault();
+                this.signInWithEmail();
+            });
+        }
+
+        // Handle Enter key in password field
+        const passwordField = document.getElementById('password');
+        if (passwordField) {
+            passwordField.addEventListener('keypress', (e) => {
+                if (e.key === 'Enter') {
+                    this.signInWithEmail();
+                }
+            });
         }
     }
 
     async signInWithGoogle() {
         try {
+            this.showLoading('Signing in with Google...');
+            
+            // Use redirect instead of popup for better compatibility
+            if (this.isMobile()) {
+                await auth.signInWithRedirect(googleProvider);
+                // Handle result after redirect
+                return;
+            } else {
+                const result = await auth.signInWithPopup(googleProvider);
+                const user = result.user;
+                
+                console.log('User signed in with Google:', user.email);
+                this.hideError();
+                
+                // Check if user exists in Firestore, if not create profile
+                await this.ensureUserProfile(user);
+            }
+            
+        } catch (error) {
+            console.error('Google sign-in error:', error);
+            this.showError(this.getErrorMessage(error));
+        } finally {
+            this.hideLoading();
+        }
+    }
+
+    async signInWithEmail() {
+        try {
+            const email = document.getElementById('email')?.value?.trim();
+            const password = document.getElementById('password')?.value;
+
+            if (!email || !password) {
+                this.showError('Please enter both email and password.');
+                return;
+            }
+
+            if (!this.isValidEmail(email)) {
+                this.showError('Please enter a valid email address.');
+                return;
+            }
+
             this.showLoading('Signing in...');
             
-            const result = await auth.signInWithPopup(googleProvider);
+            const result = await auth.signInWithEmailAndPassword(email, password);
             const user = result.user;
             
-            console.log('User signed in:', user.email);
+            console.log('User signed in with email:', user.email);
             this.hideError();
             
             // Check if user exists in Firestore, if not create profile
             await this.ensureUserProfile(user);
             
         } catch (error) {
-            console.error('Sign-in error:', error);
+            console.error('Email sign-in error:', error);
             this.showError(this.getErrorMessage(error));
         } finally {
             this.hideLoading();
         }
+    }
+
+    toggleAuthMethod() {
+        const googleAuth = document.getElementById('google-auth-section');
+        const emailAuth = document.getElementById('email-auth-section');
+        const toggleBtn = document.getElementById('toggle-auth-method');
+
+        if (googleAuth && emailAuth && toggleBtn) {
+            if (googleAuth.classList.contains('hidden')) {
+                // Show Google, hide email
+                googleAuth.classList.remove('hidden');
+                emailAuth.classList.add('hidden');
+                toggleBtn.textContent = 'Use Email/Password Instead';
+            } else {
+                // Show email, hide Google
+                googleAuth.classList.add('hidden');
+                emailAuth.classList.remove('hidden');
+                toggleBtn.textContent = 'Use Google Sign-In Instead';
+            }
+        }
+    }
+
+    isMobile() {
+        return /Android|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+    }
+
+    isValidEmail(email) {
+        const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+        return emailRegex.test(email);
     }
 
     async ensureUserProfile(user) {
@@ -146,16 +256,47 @@ class AuthManager {
 
     getErrorMessage(error) {
         switch (error.code) {
+            // Google Sign-In errors
             case 'auth/popup-blocked':
                 return 'Pop-up was blocked. Please allow pop-ups and try again.';
             case 'auth/popup-closed-by-user':
                 return 'Sign-in was cancelled. Please try again.';
+            case 'auth/cancelled-popup-request':
+                return 'Sign-in was cancelled. Please try again.';
+            
+            // Email/Password errors
+            case 'auth/user-not-found':
+                return 'No account found with this email address.';
+            case 'auth/wrong-password':
+                return 'Incorrect password. Please try again.';
+            case 'auth/invalid-email':
+                return 'Please enter a valid email address.';
+            case 'auth/user-disabled':
+                return 'This account has been disabled. Please contact support.';
+            case 'auth/too-many-requests':
+                return 'Too many failed attempts. Please wait a moment and try again.';
+            case 'auth/weak-password':
+                return 'Password is too weak. Please choose a stronger password.';
+            case 'auth/email-already-in-use':
+                return 'An account with this email already exists.';
+            case 'auth/invalid-credential':
+                return 'Invalid credentials. Please check your email and password.';
+            
+            // Network errors
             case 'auth/network-request-failed':
                 return 'Network error. Please check your connection and try again.';
-            case 'auth/too-many-requests':
-                return 'Too many attempts. Please wait a moment and try again.';
+            case 'auth/timeout':
+                return 'Request timed out. Please try again.';
+            
+            // General errors
+            case 'auth/internal-error':
+                return 'An internal error occurred. Please try again later.';
+            case 'auth/unauthorized-domain':
+                return 'This domain is not authorized for authentication.';
+            
             default:
-                return 'Sign-in failed. Please try again.';
+                console.log('Unhandled auth error:', error.code, error.message);
+                return error.message || 'Authentication failed. Please try again.';
         }
     }
 
