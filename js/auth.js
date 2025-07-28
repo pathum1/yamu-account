@@ -8,21 +8,38 @@ class AuthManager {
     }
 
     setupAuthStateListener() {
-        auth.onAuthStateChanged((user) => {
+        // Single auth state listener to prevent conflicts
+        auth.onAuthStateChanged(async (user) => {
+            console.log('Auth state changed:', user ? user.email : 'null');
             this.currentUser = user;
+            
+            if (user) {
+                // Ensure user profile exists
+                try {
+                    await this.ensureUserProfile(user);
+                } catch (error) {
+                    console.error('Error ensuring user profile:', error);
+                }
+            }
+            
             this.updateUI(user);
         });
 
-        // Handle redirect result for mobile Google Sign-In
-        auth.getRedirectResult().then((result) => {
-            if (result.user) {
+        // Handle redirect result for mobile Google Sign-In - only once
+        this.handleRedirectResult();
+    }
+
+    async handleRedirectResult() {
+        try {
+            const result = await auth.getRedirectResult();
+            if (result && result.user) {
                 console.log('User signed in via redirect:', result.user.email);
-                this.ensureUserProfile(result.user).catch(console.error);
+                // The onAuthStateChanged will handle the UI update
             }
-        }).catch((error) => {
+        } catch (error) {
             console.error('Redirect sign-in error:', error);
             this.showError(this.getErrorMessage(error));
-        });
+        }
     }
 
     setupEventListeners() {
@@ -69,21 +86,25 @@ class AuthManager {
     async signInWithGoogle() {
         try {
             this.showLoading('Signing in with Google...');
+            this.hideError();
             
-            // Use redirect instead of popup for better compatibility
+            // Use redirect for mobile, popup for desktop
             if (this.isMobile()) {
+                // On mobile, redirect to Google
+                console.log('Using redirect for mobile Google sign-in');
                 await auth.signInWithRedirect(googleProvider);
-                // Handle result after redirect
+                // The page will redirect - no need to handle result here
                 return;
             } else {
+                // On desktop, use popup
+                console.log('Using popup for desktop Google sign-in');
                 const result = await auth.signInWithPopup(googleProvider);
                 const user = result.user;
                 
                 console.log('User signed in with Google:', user.email);
                 this.hideError();
                 
-                // Check if user exists in Firestore, if not create profile
-                await this.ensureUserProfile(user);
+                // User profile will be ensured by auth state listener
             }
             
         } catch (error) {
@@ -330,8 +351,14 @@ class AuthManager {
         loadingSection.classList.add('hidden');
 
         if (user) {
-            // User is signed in
+            // User is signed in - hide all other sections
+            appDetectionSection.classList.add('hidden');
             authSection.classList.add('hidden');
+            if (dataSummary) {
+                dataSummary.classList.add('hidden');
+            }
+            
+            // Show account options
             accountOptions.classList.remove('hidden');
             
             if (userNameSpan) {
@@ -346,7 +373,7 @@ class AuthManager {
                 window.accountManager.loadUserDataSummary();
             }
         } else {
-            // User is not signed in - hide all user-specific content
+            // User is not signed in - hide user-specific content
             accountOptions.classList.add('hidden');
             
             // Hide data summary section
@@ -357,13 +384,21 @@ class AuthManager {
             // Clear user info
             this.clearUserInfo();
             
-            // Show app detection first, then auth if needed
-            if (!appDetectionSection.classList.contains('hidden')) {
-                // App detection is already shown, show auth
+            // Check if we should show app detection or auth
+            // If app detection was skipped or completed, show auth
+            if (appDetectionSection.classList.contains('hidden') || 
+                document.getElementById('use-web-btn')?.textContent?.includes('Recommended')) {
+                // Show auth section
                 authSection.classList.remove('hidden');
             } else {
-                // Show app detection first
-                appDetectionSection.classList.remove('hidden');
+                // Show app detection first (mobile devices)
+                if (this.isMobile()) {
+                    appDetectionSection.classList.remove('hidden');
+                } else {
+                    // Desktop - skip app detection
+                    appDetectionSection.classList.add('hidden');
+                    authSection.classList.remove('hidden');
+                }
             }
         }
     }
@@ -374,6 +409,16 @@ class AuthManager {
         if (loadingText) {
             loadingText.textContent = message;
         }
+        
+        // Hide other sections while loading
+        const appDetectionSection = document.getElementById('app-detection');
+        const authSection = document.getElementById('auth-section');
+        const accountOptions = document.getElementById('account-options');
+        
+        appDetectionSection.classList.add('hidden');
+        authSection.classList.add('hidden');
+        accountOptions.classList.add('hidden');
+        
         loadingSection.classList.remove('hidden');
     }
 
@@ -406,6 +451,10 @@ class AuthManager {
                 return 'Sign-in was cancelled. Please try again.';
             case 'auth/cancelled-popup-request':
                 return 'Sign-in was cancelled. Please try again.';
+            case 'auth/redirect-cancelled-by-user':
+                return 'Sign-in was cancelled. Please try again.';
+            case 'auth/redirect-operation-pending':
+                return 'Another sign-in attempt is in progress. Please wait.';
             
             // Email/Password errors
             case 'auth/user-not-found':
