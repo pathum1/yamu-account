@@ -43,25 +43,64 @@ class AuthManager {
         }
         
         this.isHandlingRedirect = true;
+        const maxRetries = 3;
+        let retryCount = 0;
         
         try {
-            const result = await auth.getRedirectResult();
-            if (result && result.user) {
-                console.log('User signed in via redirect:', result.user.email);
-                sessionStorage.removeItem('yamuOAuthInProgress');
-                // The onAuthStateChanged will handle the UI update
-            } else if (sessionStorage.getItem('yamuOAuthInProgress')) {
-                // OAuth was in progress but no result yet - wait a bit more
-                console.log('OAuth in progress, waiting for result...');
-                setTimeout(() => {
-                    this.isHandlingRedirect = false;
-                    this.handleRedirectResult();
-                }, 500);
-                return;
+            while (retryCount < maxRetries) {
+                const result = await auth.getRedirectResult();
+                
+                if (result && result.user) {
+                    console.log('User signed in via redirect:', result.user.email);
+                    // Clear all OAuth tracking flags on successful auth
+                    sessionStorage.removeItem('yamuOAuthInProgress');
+                    sessionStorage.removeItem('yamuOAuthTimestamp');
+                    sessionStorage.removeItem('yamuPreOAuthSection');
+                    // The onAuthStateChanged will handle the UI update
+                    return; // Success - exit
+                }
+                
+                const oauthTimestamp = sessionStorage.getItem('yamuOAuthTimestamp');
+                if (sessionStorage.getItem('yamuOAuthInProgress') && oauthTimestamp) {
+                    // Check if OAuth is stale (older than 5 minutes)
+                    const timestamp = parseInt(oauthTimestamp);
+                    const now = Date.now();
+                    
+                    if (now - timestamp > 300000) { // 5 minutes timeout
+                        console.log('OAuth redirect expired, clearing flags and showing error');
+                        sessionStorage.removeItem('yamuOAuthInProgress');
+                        sessionStorage.removeItem('yamuOAuthTimestamp');
+                        sessionStorage.removeItem('yamuPreOAuthSection');
+                        this.showError('Sign-in took too long and expired. Please try again.');
+                        break;
+                    }
+                    
+                    // Wait and retry with exponential backoff
+                    const delay = Math.min(1000 * Math.pow(2, retryCount), 5000); // Max 5 seconds
+                    console.log(`OAuth in progress, retry ${retryCount + 1}/${maxRetries} in ${delay}ms`);
+                    await new Promise(resolve => setTimeout(resolve, delay));
+                    retryCount++;
+                } else {
+                    // No OAuth in progress, nothing to handle
+                    break;
+                }
             }
+            
+            // If we've exhausted retries and still have OAuth in progress, show error
+            if (retryCount >= maxRetries && sessionStorage.getItem('yamuOAuthInProgress')) {
+                console.log('OAuth redirect handling exhausted retries, clearing flags');
+                sessionStorage.removeItem('yamuOAuthInProgress');
+                sessionStorage.removeItem('yamuOAuthTimestamp');
+                sessionStorage.removeItem('yamuPreOAuthSection');
+                this.showError('Sign-in process failed. Please try again.');
+            }
+            
         } catch (error) {
             console.error('Redirect sign-in error:', error);
+            // Clear all OAuth flags on error
             sessionStorage.removeItem('yamuOAuthInProgress');
+            sessionStorage.removeItem('yamuOAuthTimestamp');
+            sessionStorage.removeItem('yamuPreOAuthSection');
             this.showError(this.getErrorMessage(error));
         } finally {
             this.isHandlingRedirect = false;
@@ -119,11 +158,28 @@ class AuthManager {
                 // On mobile, redirect to Google
                 console.log('Using redirect for mobile Google sign-in');
                 
-                // Set flag to track OAuth flow
+                // Clear any existing flags first to prevent conflicts
+                sessionStorage.removeItem('yamuOAuthInProgress');
+                sessionStorage.removeItem('yamuPreOAuthSection');
+                sessionStorage.removeItem('yamuOAuthTimestamp');
+                
+                // Set flag AFTER clearing with timestamp for expiration tracking
                 sessionStorage.setItem('yamuOAuthInProgress', 'true');
                 sessionStorage.setItem('yamuPreOAuthSection', 'auth'); // Remember we were in auth
+                sessionStorage.setItem('yamuOAuthTimestamp', Date.now().toString());
                 
-                await auth.signInWithRedirect(googleProvider);
+                // Show mobile-specific loading message
+                this.showMobileRedirectStatus();
+                
+                // Add error handling for redirect
+                try {
+                    await auth.signInWithRedirect(googleProvider);
+                } catch (redirectError) {
+                    console.error('Redirect failed:', redirectError);
+                    sessionStorage.removeItem('yamuOAuthInProgress');
+                    sessionStorage.removeItem('yamuOAuthTimestamp');
+                    throw new Error('Failed to redirect to Google: ' + redirectError.message);
+                }
                 // The page will redirect - no need to handle result here
                 return;
             } else {
@@ -140,10 +196,15 @@ class AuthManager {
             
         } catch (error) {
             console.error('Google sign-in error:', error);
+            // Clear OAuth flags on any error
             sessionStorage.removeItem('yamuOAuthInProgress');
+            sessionStorage.removeItem('yamuOAuthTimestamp');
             this.showError(this.getErrorMessage(error));
         } finally {
-            this.hideLoading();
+            // Only hide loading if not doing mobile redirect
+            if (!this.isMobile() || sessionStorage.getItem('yamuOAuthInProgress') !== 'true') {
+                this.hideLoading();
+            }
         }
     }
 
@@ -243,23 +304,34 @@ class AuthManager {
             const modalConfirm = document.getElementById('modal-confirm');
             const modalCancel = document.getElementById('modal-cancel');
 
+            if (!modal || !modalTitle || !modalMessage || !modalConfirm || !modalCancel) {
+                console.error('Modal elements not found, signing out directly');
+                await this.signOut();
+                return;
+            }
+
             modalTitle.textContent = '🚪 Sign Out';
-            modalMessage.innerHTML = `
+            modalMessage.innerHTML = Security.createSafeHTML(`
                 <p>Are you sure you want to sign out?</p>
                 <p class="small">You'll need to sign in again to access account management options.</p>
-            `;
+            `);
 
             modalConfirm.textContent = 'Sign Out';
             modalConfirm.classList.remove('hidden');
             modal.classList.remove('hidden');
 
-            // Handle confirmation
+            // Handle confirmation with cleanup
             const handleConfirm = async () => {
-                modalConfirm.removeEventListener('click', handleConfirm);
-                modalCancel.removeEventListener('click', handleCancel);
-                modal.classList.add('hidden');
-                
-                await this.signOut();
+                try {
+                    modalConfirm.removeEventListener('click', handleConfirm);
+                    modalCancel.removeEventListener('click', handleCancel);
+                    modal.classList.add('hidden');
+                    
+                    await this.signOut();
+                } catch (error) {
+                    console.error('Error during sign out confirmation:', error);
+                    this.showError('Failed to sign out. Please try again.');
+                }
             };
 
             const handleCancel = () => {
@@ -273,6 +345,7 @@ class AuthManager {
 
         } catch (error) {
             console.error('Sign out dialog error:', error);
+            this.showError('Error showing sign out dialog. Signing out directly...');
             // Fallback - sign out directly
             await this.signOut();
         }
@@ -285,9 +358,10 @@ class AuthManager {
             // Clear any cached data FIRST
             this.currentUser = null;
             
-            // Clear OAuth flow flags
+            // Clear OAuth flow flags and timestamp
             sessionStorage.removeItem('yamuOAuthInProgress');
             sessionStorage.removeItem('yamuPreOAuthSection');
+            sessionStorage.removeItem('yamuOAuthTimestamp');
             sessionStorage.removeItem('yamuWebFlowChosen');
             
             // Immediately hide user-specific sections and clear data
@@ -477,6 +551,44 @@ class AuthManager {
         loadingSection.classList.add('hidden');
     }
 
+    showMobileRedirectStatus() {
+        const loadingSection = document.getElementById('loading');
+        const loadingText = loadingSection.querySelector('p');
+        
+        if (loadingText) {
+            loadingText.innerHTML = `
+                <div class="mobile-redirect-status">
+                    <div class="spinner"></div>
+                    <p>Redirecting to Google Sign-In...</p>
+                    <p class="small" style="color: var(--text-secondary); margin-top: 8px;">
+                        You'll be brought back to YAMU after signing in
+                    </p>
+                    <div class="redirect-help" style="margin-top: 16px;">
+                        <p class="tiny" style="font-size: 12px; color: var(--text-secondary);">
+                            Taking too long? 
+                            <button class="btn-link" onclick="location.reload()" 
+                                    style="color: var(--primary-color); text-decoration: underline; background: none; border: none; cursor: pointer;">
+                                Try again
+                            </button>
+                        </p>
+                    </div>
+                </div>
+            `;
+        }
+        
+        // Ensure loading section is visible
+        loadingSection.classList.remove('hidden');
+        
+        // Hide other sections while redirecting
+        const appDetectionSection = document.getElementById('app-detection');
+        const authSection = document.getElementById('auth-section');
+        const accountOptions = document.getElementById('account-options');
+        
+        if (appDetectionSection) appDetectionSection.classList.add('hidden');
+        if (authSection) authSection.classList.add('hidden');
+        if (accountOptions) accountOptions.classList.add('hidden');
+    }
+
     showError(message) {
         const errorDiv = document.getElementById('auth-error');
         if (errorDiv) {
@@ -493,52 +605,72 @@ class AuthManager {
     }
 
     getErrorMessage(error) {
+        // Add mobile-specific context to error messages
+        const isMobile = this.isMobile();
+        
         switch (error.code) {
             // Google Sign-In errors
             case 'auth/popup-blocked':
-                return 'Pop-up was blocked. Please allow pop-ups and try again.';
+                return isMobile 
+                    ? 'Sign-in was blocked. Please try again or use a different browser.'
+                    : 'Pop-up was blocked. Please allow pop-ups and try again.';
             case 'auth/popup-closed-by-user':
                 return 'Sign-in was cancelled. Please try again.';
             case 'auth/cancelled-popup-request':
                 return 'Sign-in was cancelled. Please try again.';
             case 'auth/redirect-cancelled-by-user':
-                return 'Sign-in was cancelled. Please try again.';
+                return 'Sign-in was cancelled. You can try again or use email/password instead.';
             case 'auth/redirect-operation-pending':
-                return 'Another sign-in attempt is in progress. Please wait.';
+                return 'Another sign-in attempt is in progress. Please wait a moment.';
             
             // Email/Password errors
             case 'auth/user-not-found':
-                return 'No account found with this email address.';
+                return 'No account found with this email address. Please check your email or create an account.';
             case 'auth/wrong-password':
-                return 'Incorrect password. Please try again.';
+                return 'Incorrect password. Please try again or reset your password.';
             case 'auth/invalid-email':
                 return 'Please enter a valid email address.';
             case 'auth/user-disabled':
-                return 'This account has been disabled. Please contact support.';
+                return 'This account has been disabled. Please contact support for assistance.';
             case 'auth/too-many-requests':
-                return 'Too many failed attempts. Please wait a moment and try again.';
+                return 'Too many failed attempts. Please wait a few minutes and try again.';
             case 'auth/weak-password':
-                return 'Password is too weak. Please choose a stronger password.';
+                return 'Password is too weak. Please choose a stronger password (at least 6 characters).';
             case 'auth/email-already-in-use':
-                return 'An account with this email already exists.';
+                return 'An account with this email already exists. Please sign in instead.';
             case 'auth/invalid-credential':
                 return 'Invalid credentials. Please check your email and password.';
             
-            // Network errors
+            // Network errors  
             case 'auth/network-request-failed':
-                return 'Network error. Please check your connection and try again.';
+                return isMobile
+                    ? 'Network error. Please check your mobile connection and try again.'
+                    : 'Network error. Please check your internet connection and try again.';
             case 'auth/timeout':
-                return 'Request timed out. Please try again.';
+                return 'Request timed out. Please check your connection and try again.';
             
             // General errors
             case 'auth/internal-error':
-                return 'An internal error occurred. Please try again later.';
+                return 'An internal error occurred. Please try again in a few moments.';
             case 'auth/unauthorized-domain':
-                return 'This domain is not authorized for authentication.';
+                return 'This website is not authorized for sign-in. Please contact support.';
+            
+            // Mobile-specific errors
+            case 'auth/credential-already-in-use':
+                return 'This Google account is already linked to another user. Please try a different account.';
+            case 'auth/account-exists-with-different-credential':
+                return 'An account already exists with this email using a different sign-in method.';
             
             default:
                 console.log('Unhandled auth error:', error.code, error.message);
-                return error.message || 'Authentication failed. Please try again.';
+                const defaultMessage = error.message || 'Authentication failed. Please try again.';
+                
+                // Add helpful context for mobile users
+                if (isMobile && defaultMessage.includes('redirect')) {
+                    return `${defaultMessage} If this persists, try using email/password sign-in instead.`;
+                }
+                
+                return defaultMessage;
         }
     }
 
