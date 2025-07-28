@@ -26,6 +26,14 @@ googleProvider.setCustomParameters({
     prompt: 'select_account'
 });
 
+// Configure auth settings for better mobile compatibility
+auth.useDeviceLanguage();
+
+// Set auth persistence to LOCAL for better user experience
+auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL).catch((error) => {
+    console.log('Auth persistence error:', error);
+});
+
 // Export for use in other modules
 window.firebaseConfig = firebaseConfig;
 window.auth = auth;
