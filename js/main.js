@@ -91,13 +91,37 @@ class YAMUAccountManagement {
     handleError(error, context = '') {
         console.error(`Error in ${context}:`, error);
         
+        // Try to show a toast notification first (less intrusive)
+        if (window.Utils) {
+            const errorMessage = context 
+                ? `${context}: ${error.message || error}`
+                : error.message || error;
+            Utils.showToast(errorMessage, 'error', 5000);
+            return;
+        }
+        
+        // Fallback to modal if utils not available
         const modal = document.getElementById('modal');
         const modalTitle = document.getElementById('modal-title');
         const modalMessage = document.getElementById('modal-message');
         const modalConfirm = document.getElementById('modal-confirm');
 
+        if (!modal || !modalTitle || !modalMessage || !modalConfirm) {
+            // Final fallback to alert if modal elements not found
+            alert(`Error${context ? ` in ${context}` : ''}: ${error.message || error}`);
+            return;
+        }
+
         modalTitle.textContent = 'Error';
-        modalMessage.innerHTML = `
+        modalMessage.innerHTML = window.Security ? Security.createSafeHTML(`
+            <div class="error-message">
+                <p>An error occurred: {errorMessage}</p>
+                {contextMessage}
+            </div>
+        `, {
+            errorMessage: error.message || error,
+            contextMessage: context ? `<p class="small">Context: ${context}</p>` : ''
+        }) : `
             <div class="error-message">
                 <p>An error occurred: ${error.message || error}</p>
                 ${context ? `<p class="small">Context: ${context}</p>` : ''}
