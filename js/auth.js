@@ -3,6 +3,8 @@
 class AuthManager {
     constructor() {
         this.currentUser = null;
+        this.isHandlingRedirect = false;
+        this.authReady = false;
         this.setupAuthStateListener();
         this.setupEventListeners();
     }
@@ -12,8 +14,17 @@ class AuthManager {
         auth.onAuthStateChanged(async (user) => {
             console.log('Auth state changed:', user ? user.email : 'null');
             this.currentUser = user;
+            this.authReady = true;
+            
+            // Handle redirect result after auth state is ready
+            if (!this.isHandlingRedirect) {
+                this.handleRedirectResult();
+            }
             
             if (user) {
+                // Clear OAuth flow flag on successful auth
+                sessionStorage.removeItem('yamuOAuthInProgress');
+                
                 // Ensure user profile exists
                 try {
                     await this.ensureUserProfile(user);
@@ -24,21 +35,36 @@ class AuthManager {
             
             this.updateUI(user);
         });
-
-        // Handle redirect result for mobile Google Sign-In - only once
-        this.handleRedirectResult();
     }
 
     async handleRedirectResult() {
+        if (this.isHandlingRedirect) {
+            return; // Prevent multiple simultaneous calls
+        }
+        
+        this.isHandlingRedirect = true;
+        
         try {
             const result = await auth.getRedirectResult();
             if (result && result.user) {
                 console.log('User signed in via redirect:', result.user.email);
+                sessionStorage.removeItem('yamuOAuthInProgress');
                 // The onAuthStateChanged will handle the UI update
+            } else if (sessionStorage.getItem('yamuOAuthInProgress')) {
+                // OAuth was in progress but no result yet - wait a bit more
+                console.log('OAuth in progress, waiting for result...');
+                setTimeout(() => {
+                    this.isHandlingRedirect = false;
+                    this.handleRedirectResult();
+                }, 500);
+                return;
             }
         } catch (error) {
             console.error('Redirect sign-in error:', error);
+            sessionStorage.removeItem('yamuOAuthInProgress');
             this.showError(this.getErrorMessage(error));
+        } finally {
+            this.isHandlingRedirect = false;
         }
     }
 
@@ -92,6 +118,11 @@ class AuthManager {
             if (this.isMobile()) {
                 // On mobile, redirect to Google
                 console.log('Using redirect for mobile Google sign-in');
+                
+                // Set flag to track OAuth flow
+                sessionStorage.setItem('yamuOAuthInProgress', 'true');
+                sessionStorage.setItem('yamuPreOAuthSection', 'auth'); // Remember we were in auth
+                
                 await auth.signInWithRedirect(googleProvider);
                 // The page will redirect - no need to handle result here
                 return;
@@ -109,6 +140,7 @@ class AuthManager {
             
         } catch (error) {
             console.error('Google sign-in error:', error);
+            sessionStorage.removeItem('yamuOAuthInProgress');
             this.showError(this.getErrorMessage(error));
         } finally {
             this.hideLoading();
@@ -253,6 +285,11 @@ class AuthManager {
             // Clear any cached data FIRST
             this.currentUser = null;
             
+            // Clear OAuth flow flags
+            sessionStorage.removeItem('yamuOAuthInProgress');
+            sessionStorage.removeItem('yamuPreOAuthSection');
+            sessionStorage.removeItem('yamuWebFlowChosen');
+            
             // Immediately hide user-specific sections and clear data
             const accountOptions = document.getElementById('account-options');
             const dataSummary = document.getElementById('data-summary');
@@ -384,16 +421,29 @@ class AuthManager {
             // Clear user info
             this.clearUserInfo();
             
-            // Check if we should show app detection or auth
-            // If app detection was skipped or completed, show auth
-            if (appDetectionSection.classList.contains('hidden') || 
+            // Check if user is returning from OAuth redirect
+            const oauthInProgress = sessionStorage.getItem('yamuOAuthInProgress');
+            const preOAuthSection = sessionStorage.getItem('yamuPreOAuthSection');
+            
+            if (oauthInProgress) {
+                // User is returning from OAuth but auth not complete yet
+                // Show loading with appropriate message
+                this.showLoading('Completing sign-in...');
+                return;
+            }
+            
+            // Determine which section to show based on context
+            if (preOAuthSection === 'auth' || 
+                appDetectionSection.classList.contains('hidden') || 
                 document.getElementById('use-web-btn')?.textContent?.includes('Recommended')) {
-                // Show auth section
+                // Show auth section - user was already past app detection
+                appDetectionSection.classList.add('hidden');
                 authSection.classList.remove('hidden');
             } else {
-                // Show app detection first (mobile devices)
+                // Show app detection first (mobile devices only)
                 if (this.isMobile()) {
                     appDetectionSection.classList.remove('hidden');
+                    authSection.classList.add('hidden');
                 } else {
                     // Desktop - skip app detection
                     appDetectionSection.classList.add('hidden');
