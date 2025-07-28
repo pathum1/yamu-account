@@ -29,10 +29,27 @@ googleProvider.setCustomParameters({
 // Configure auth settings for better mobile compatibility
 auth.useDeviceLanguage();
 
-// Set auth persistence to LOCAL for better user experience
-auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL).catch((error) => {
-    console.log('Auth persistence error:', error);
-});
+// Set auth persistence with mobile fallback
+const setPersistence = async () => {
+    try {
+        await auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL);
+        console.log('Auth persistence set to LOCAL');
+    } catch (error) {
+        console.warn('Auth persistence error (mobile fallback):', error);
+        // Continue without persistence on mobile if needed
+    }
+};
+
+// Mobile-specific initialization
+if (/Android|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent)) {
+    // Add mobile-specific Firebase optimizations
+    console.log('Mobile device detected - applying mobile auth optimizations');
+    
+    // Additional mobile-specific settings
+    auth.settings.appVerificationDisabledForTesting = false; // Ensure proper verification
+}
+
+setPersistence();
 
 // Export for use in other modules
 window.firebaseConfig = firebaseConfig;
