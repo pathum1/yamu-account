@@ -7,16 +7,23 @@ class YAMUAccountManagement {
     }
 
     initializeApp() {
-        // Wait for Firebase to initialize
-        auth.onAuthStateChanged((user) => {
-            if (user) {
-                // User is signed in, they can proceed directly to account options
+        // Let AuthManager handle auth state changes to prevent conflicts
+        // Just initialize the UI flow - auth state will be handled by AuthManager
+        this.checkInitialState();
+    }
+
+    checkInitialState() {
+        // Check if user is already authenticated on page load
+        // This runs after Firebase initializes
+        setTimeout(() => {
+            if (auth.currentUser) {
+                // User is already signed in
                 this.showAccountOptions();
             } else {
                 // User is not signed in, start with app detection
                 this.startAppDetectionFlow();
             }
-        });
+        }, 100); // Small delay to ensure Firebase is initialized
     }
 
     startAppDetectionFlow() {
