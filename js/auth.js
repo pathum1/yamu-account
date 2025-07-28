@@ -5,8 +5,49 @@ class AuthManager {
         this.currentUser = null;
         this.isHandlingRedirect = false;
         this.authReady = false;
+        
+        // Mobile browser page lifecycle handling
+        this.handlePageVisibility();
+        
         this.setupAuthStateListener();
         this.setupEventListeners();
+    }
+
+    handlePageVisibility() {
+        if (this.isMobile()) {
+            document.addEventListener('visibilitychange', () => {
+                if (!document.hidden && this.getOAuthFlag('yamuOAuthInProgress')) {
+                    // Page became visible again - may be returning from OAuth
+                    console.log('Page became visible during OAuth flow, checking for redirect result');
+                    setTimeout(() => {
+                        if (!this.currentUser && !this.isHandlingRedirect) {
+                            console.log('Triggering redirect result handling after page visibility change');
+                            this.handleRedirectResult();
+                        }
+                    }, 1000);
+                }
+            });
+
+            // Handle page focus events (additional mobile browser support)
+            window.addEventListener('focus', () => {
+                if (this.getOAuthFlag('yamuOAuthInProgress')) {
+                    console.log('Window focused during OAuth flow');
+                    setTimeout(() => {
+                        if (!this.currentUser && !this.isHandlingRedirect) {
+                            this.handleRedirectResult();
+                        }
+                    }, 500);
+                }
+            });
+
+            // Handle app resume on mobile (for PWA-like behavior)
+            document.addEventListener('resume', () => {
+                if (this.getOAuthFlag('yamuOAuthInProgress')) {
+                    console.log('App resumed during OAuth flow');
+                    this.handleRedirectResult();
+                }
+            });
+        }
     }
 
     setupAuthStateListener() {
@@ -43,67 +84,108 @@ class AuthManager {
         }
         
         this.isHandlingRedirect = true;
-        const maxRetries = 3;
-        let retryCount = 0;
         
         try {
-            while (retryCount < maxRetries) {
+            // SOLUTION 1: Wait for Firebase to be fully ready
+            await this.waitForFirebaseReady();
+            
+            // SOLUTION 2: Mobile-specific timeout (30 seconds vs 60 seconds for desktop)
+            const timeout = this.isMobile() ? 30000 : 60000;
+            const startTime = Date.now();
+            
+            console.log(`Starting redirect result handling (mobile: ${this.isMobile()}, timeout: ${timeout}ms)`);
+            
+            while (Date.now() - startTime < timeout) {
                 const result = await auth.getRedirectResult();
                 
                 if (result && result.user) {
                     console.log('User signed in via redirect:', result.user.email);
-                    // Clear all OAuth tracking flags on successful auth
-                    sessionStorage.removeItem('yamuOAuthInProgress');
-                    sessionStorage.removeItem('yamuOAuthTimestamp');
-                    sessionStorage.removeItem('yamuPreOAuthSection');
+                    this.clearOAuthFlags();
                     // The onAuthStateChanged will handle the UI update
                     return; // Success - exit
                 }
                 
-                const oauthTimestamp = sessionStorage.getItem('yamuOAuthTimestamp');
-                if (sessionStorage.getItem('yamuOAuthInProgress') && oauthTimestamp) {
-                    // Check if OAuth is stale (older than 5 minutes)
-                    const timestamp = parseInt(oauthTimestamp);
-                    const now = Date.now();
-                    
-                    if (now - timestamp > 300000) { // 5 minutes timeout
-                        console.log('OAuth redirect expired, clearing flags and showing error');
-                        sessionStorage.removeItem('yamuOAuthInProgress');
-                        sessionStorage.removeItem('yamuOAuthTimestamp');
-                        sessionStorage.removeItem('yamuPreOAuthSection');
-                        this.showError('Sign-in took too long and expired. Please try again.');
-                        break;
-                    }
-                    
-                    // Wait and retry with exponential backoff
-                    const delay = Math.min(1000 * Math.pow(2, retryCount), 5000); // Max 5 seconds
-                    console.log(`OAuth in progress, retry ${retryCount + 1}/${maxRetries} in ${delay}ms`);
-                    await new Promise(resolve => setTimeout(resolve, delay));
-                    retryCount++;
-                } else {
-                    // No OAuth in progress, nothing to handle
+                // Check if OAuth is still valid using enhanced flag retrieval
+                const oauthInProgress = this.getOAuthFlag('yamuOAuthInProgress');
+                const oauthTimestamp = this.getOAuthFlag('yamuOAuthTimestamp');
+                
+                if (!oauthInProgress) {
+                    console.log('No OAuth in progress, exiting redirect handling');
                     break;
                 }
+                
+                // Check if OAuth has expired (stale timestamp)
+                if (oauthTimestamp) {
+                    const timestamp = parseInt(oauthTimestamp);
+                    const age = Date.now() - timestamp;
+                    
+                    if (age > 300000) { // 5 minutes - OAuth is stale
+                        console.log('OAuth redirect expired (age: ' + Math.round(age/1000) + 's), clearing flags');
+                        this.handleMobileAuthTimeout();
+                        break;
+                    }
+                }
+                
+                // SOLUTION 3: Fixed 2-second polling instead of exponential backoff
+                console.log('Waiting for redirect result... (elapsed: ' + Math.round((Date.now() - startTime)/1000) + 's)');
+                await new Promise(resolve => setTimeout(resolve, 2000));
             }
             
-            // If we've exhausted retries and still have OAuth in progress, show error
-            if (retryCount >= maxRetries && sessionStorage.getItem('yamuOAuthInProgress')) {
-                console.log('OAuth redirect handling exhausted retries, clearing flags');
-                sessionStorage.removeItem('yamuOAuthInProgress');
-                sessionStorage.removeItem('yamuOAuthTimestamp');
-                sessionStorage.removeItem('yamuPreOAuthSection');
-                this.showError('Sign-in process failed. Please try again.');
+            // SOLUTION 4: Handle timeout gracefully
+            if (Date.now() - startTime >= timeout && this.getOAuthFlag('yamuOAuthInProgress')) {
+                console.log('Redirect handling timed out');
+                this.handleMobileAuthTimeout();
             }
             
         } catch (error) {
             console.error('Redirect sign-in error:', error);
-            // Clear all OAuth flags on error
-            sessionStorage.removeItem('yamuOAuthInProgress');
-            sessionStorage.removeItem('yamuOAuthTimestamp');
-            sessionStorage.removeItem('yamuPreOAuthSection');
-            this.showError(this.getErrorMessage(error));
+            this.showMobileAuthError(error);
         } finally {
             this.isHandlingRedirect = false;
+        }
+    }
+
+    // SOLUTION 4: Mobile-specific timeout handling
+    handleMobileAuthTimeout() {
+        this.clearOAuthFlags();
+        
+        const message = this.isMobile() 
+            ? `Sign-in timed out. This can happen on mobile browsers. Please try:\n• Using email/password sign-in instead\n• Refreshing the page and trying again\n• Checking your internet connection`
+            : 'Sign-in timed out. Please try again.';
+            
+        this.showError(message);
+        
+        // Show email auth as fallback for mobile
+        if (this.isMobile()) {
+            setTimeout(() => this.suggestEmailAuth(), 2000);
+        }
+    }
+
+    // Mobile-specific error handling
+    showMobileAuthError(error) {
+        this.clearOAuthFlags();
+        const errorMessage = this.getErrorMessage(error);
+        this.showError(errorMessage);
+        
+        // For mobile, always suggest email fallback on auth errors
+        if (this.isMobile()) {
+            setTimeout(() => this.suggestEmailAuth(), 3000);
+        }
+    }
+
+    // Suggest email authentication as fallback
+    suggestEmailAuth() {
+        if (this.isMobile() && window.Utils) {
+            Utils.showToast('Consider using email sign-in for better mobile experience', 'info', 5000);
+        }
+        
+        // Auto-switch to email auth method if available
+        const googleAuth = document.getElementById('google-auth-section');
+        const emailAuth = document.getElementById('email-auth-section');
+        const toggleBtn = document.getElementById('toggle-auth-method');
+        
+        if (googleAuth && emailAuth && toggleBtn && googleAuth.classList.contains('visible')) {
+            this.toggleAuthMethod(); // Switch to email/password
         }
     }
 
@@ -159,14 +241,12 @@ class AuthManager {
                 console.log('Using redirect for mobile Google sign-in');
                 
                 // Clear any existing flags first to prevent conflicts
-                sessionStorage.removeItem('yamuOAuthInProgress');
-                sessionStorage.removeItem('yamuPreOAuthSection');
-                sessionStorage.removeItem('yamuOAuthTimestamp');
+                this.clearOAuthFlags();
                 
                 // Set flag AFTER clearing with timestamp for expiration tracking
-                sessionStorage.setItem('yamuOAuthInProgress', 'true');
-                sessionStorage.setItem('yamuPreOAuthSection', 'auth'); // Remember we were in auth
-                sessionStorage.setItem('yamuOAuthTimestamp', Date.now().toString());
+                this.setOAuthFlag('yamuOAuthInProgress', 'true');
+                this.setOAuthFlag('yamuPreOAuthSection', 'auth'); // Remember we were in auth
+                this.setOAuthFlag('yamuOAuthTimestamp', Date.now().toString());
                 
                 // Show mobile-specific loading message
                 this.showMobileRedirectStatus();
@@ -176,8 +256,7 @@ class AuthManager {
                     await auth.signInWithRedirect(googleProvider);
                 } catch (redirectError) {
                     console.error('Redirect failed:', redirectError);
-                    sessionStorage.removeItem('yamuOAuthInProgress');
-                    sessionStorage.removeItem('yamuOAuthTimestamp');
+                    this.clearOAuthFlags();
                     throw new Error('Failed to redirect to Google: ' + redirectError.message);
                 }
                 // The page will redirect - no need to handle result here
@@ -197,12 +276,11 @@ class AuthManager {
         } catch (error) {
             console.error('Google sign-in error:', error);
             // Clear OAuth flags on any error
-            sessionStorage.removeItem('yamuOAuthInProgress');
-            sessionStorage.removeItem('yamuOAuthTimestamp');
+            this.clearOAuthFlags();
             this.showError(this.getErrorMessage(error));
         } finally {
             // Only hide loading if not doing mobile redirect
-            if (!this.isMobile() || sessionStorage.getItem('yamuOAuthInProgress') !== 'true') {
+            if (!this.isMobile() || this.getOAuthFlag('yamuOAuthInProgress') !== 'true') {
                 this.hideLoading();
             }
         }
@@ -263,7 +341,72 @@ class AuthManager {
     }
 
     isMobile() {
-        return /Android|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+        // Multiple detection methods for reliability
+        const userAgentMobile = /Android|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+        const touchDevice = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
+        const smallScreen = window.innerWidth <= 768 || window.innerHeight <= 768;
+        const mobileViewport = window.devicePixelRatio > 1;
+        
+        return userAgentMobile || (touchDevice && (smallScreen || mobileViewport));
+    }
+
+    // Firebase ready check to prevent race conditions
+    async waitForFirebaseReady() {
+        const maxWait = 5000; // 5 seconds max wait
+        const startTime = Date.now();
+        
+        while (Date.now() - startTime < maxWait) {
+            if (auth && typeof auth.getRedirectResult === 'function') {
+                // Additional mobile check - ensure auth state is stable
+                if (this.isMobile()) {
+                    await new Promise(resolve => setTimeout(resolve, 500));
+                }
+                return;
+            }
+            await new Promise(resolve => setTimeout(resolve, 100));
+        }
+        
+        throw new Error('Firebase not ready after timeout');
+    }
+
+    // Enhanced storage for mobile reliability
+    setOAuthFlag(key, value) {
+        try {
+            sessionStorage.setItem(key, value);
+            // Fallback to localStorage on mobile for reliability
+            if (this.isMobile()) {
+                localStorage.setItem(`yamu_temp_${key}`, value);
+            }
+        } catch (e) {
+            console.warn('Storage not available:', e);
+        }
+    }
+
+    getOAuthFlag(key) {
+        try {
+            let value = sessionStorage.getItem(key);
+            // Mobile fallback check
+            if (!value && this.isMobile()) {
+                value = localStorage.getItem(`yamu_temp_${key}`);
+            }
+            return value;
+        } catch (e) {
+            return null;
+        }
+    }
+
+    clearOAuthFlags() {
+        const flags = ['yamuOAuthInProgress', 'yamuOAuthTimestamp', 'yamuPreOAuthSection'];
+        flags.forEach(flag => {
+            try {
+                sessionStorage.removeItem(flag);
+                if (this.isMobile()) {
+                    localStorage.removeItem(`yamu_temp_${flag}`);
+                }
+            } catch (e) {
+                console.warn('Failed to clear flag:', flag);
+            }
+        });
     }
 
     isValidEmail(email) {
@@ -359,9 +502,7 @@ class AuthManager {
             this.currentUser = null;
             
             // Clear OAuth flow flags and timestamp
-            sessionStorage.removeItem('yamuOAuthInProgress');
-            sessionStorage.removeItem('yamuPreOAuthSection');
-            sessionStorage.removeItem('yamuOAuthTimestamp');
+            this.clearOAuthFlags();
             sessionStorage.removeItem('yamuWebFlowChosen');
             
             // Immediately hide user-specific sections and clear data
@@ -496,8 +637,8 @@ class AuthManager {
             this.clearUserInfo();
             
             // Check if user is returning from OAuth redirect
-            const oauthInProgress = sessionStorage.getItem('yamuOAuthInProgress');
-            const preOAuthSection = sessionStorage.getItem('yamuPreOAuthSection');
+            const oauthInProgress = this.getOAuthFlag('yamuOAuthInProgress');
+            const preOAuthSection = this.getOAuthFlag('yamuPreOAuthSection');
             
             if (oauthInProgress) {
                 // User is returning from OAuth but auth not complete yet
@@ -559,21 +700,26 @@ class AuthManager {
             loadingText.innerHTML = `
                 <div class="mobile-redirect-status">
                     <div class="spinner"></div>
-                    <p>Redirecting to Google Sign-In...</p>
+                    <p>Completing sign-in...</p>
                     <p class="small" style="color: var(--text-secondary); margin-top: 8px;">
-                        You'll be brought back to YAMU after signing in
+                        This usually takes 5-10 seconds on mobile
                     </p>
-                    <div class="redirect-help" style="margin-top: 16px;">
+                    <div class="mobile-auth-help" style="margin-top: 20px;">
                         <p class="tiny" style="font-size: 12px; color: var(--text-secondary);">
-                            Taking too long? 
-                            <button class="btn-link" onclick="location.reload()" 
-                                    style="color: var(--primary-color); text-decoration: underline; background: none; border: none; cursor: pointer;">
-                                Try again
-                            </button>
+                            Taking longer than expected?
                         </p>
+                        <button id="mobile-auth-retry" class="btn btn-secondary" style="margin: 8px 4px; padding: 6px 12px; font-size: 12px;">
+                            Try Again
+                        </button>
+                        <button id="mobile-auth-email" class="btn btn-link" style="margin: 8px 4px; font-size: 12px;">
+                            Use Email Instead
+                        </button>
                     </div>
                 </div>
             `;
+            
+            // Add event listeners for mobile retry options
+            this.setupMobileRetryHandlers();
         }
         
         // Ensure loading section is visible
@@ -587,6 +733,41 @@ class AuthManager {
         if (appDetectionSection) appDetectionSection.classList.add('hidden');
         if (authSection) authSection.classList.add('hidden');
         if (accountOptions) accountOptions.classList.add('hidden');
+    }
+
+    setupMobileRetryHandlers() {
+        // Use setTimeout to ensure DOM elements are ready
+        setTimeout(() => {
+            const retryBtn = document.getElementById('mobile-auth-retry');
+            const emailBtn = document.getElementById('mobile-auth-email');
+            
+            if (retryBtn) {
+                retryBtn.addEventListener('click', () => {
+                    console.log('User clicked retry on mobile auth');
+                    this.clearOAuthFlags();
+                    if (window.Utils) {
+                        Utils.showToast('Restarting sign-in process...', 'info', 2000);
+                    }
+                    setTimeout(() => location.reload(), 500);
+                });
+            }
+            
+            if (emailBtn) {
+                emailBtn.addEventListener('click', () => {
+                    console.log('User clicked email fallback on mobile auth');
+                    this.clearOAuthFlags();
+                    this.hideLoading();
+                    this.suggestEmailAuth();
+                    
+                    // Show auth section with email method
+                    const authSection = document.getElementById('auth-section');
+                    if (authSection) {
+                        authSection.classList.remove('hidden');
+                        this.toggleAuthMethod(); // Switch to email if on Google method
+                    }
+                });
+            }
+        }, 100);
     }
 
     showError(message) {
