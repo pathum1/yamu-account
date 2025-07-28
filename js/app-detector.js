@@ -112,18 +112,23 @@ class AppDetector {
     }
 
     continueOnWeb() {
+        console.log('User chose to continue on web');
+        
         // Hide app detection section
         const appDetectionSection = document.getElementById('app-detection');
         appDetectionSection.classList.add('hidden');
 
-        // Show authentication section if user not logged in
-        if (!window.authManager || !window.authManager.isAuthenticated()) {
-            const authSection = document.getElementById('auth-section');
-            authSection.classList.remove('hidden');
-        } else {
-            // User already authenticated, show account options
+        // Check authentication state and show appropriate section
+        if (auth.currentUser) {
+            // User is already authenticated, show account options
+            console.log('User already authenticated, showing account options');
             const accountOptions = document.getElementById('account-options');
             accountOptions.classList.remove('hidden');
+        } else {
+            // User not authenticated, show auth section
+            console.log('User not authenticated, showing auth section');
+            const authSection = document.getElementById('auth-section');
+            authSection.classList.remove('hidden');
         }
     }
 
