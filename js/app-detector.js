@@ -114,6 +114,9 @@ class AppDetector {
     continueOnWeb() {
         console.log('User chose to continue on web');
         
+        // Set flag that user has chosen web flow
+        sessionStorage.setItem('yamuWebFlowChosen', 'true');
+        
         // Hide app detection section
         const appDetectionSection = document.getElementById('app-detection');
         appDetectionSection.classList.add('hidden');
@@ -144,6 +147,14 @@ class AppDetector {
 
     // Public method to trigger app detection flow
     startAppDetection() {
+        // Skip app detection if returning from OAuth or web flow already chosen
+        if (sessionStorage.getItem('yamuOAuthInProgress') || 
+            sessionStorage.getItem('yamuWebFlowChosen')) {
+            console.log('Skipping app detection - OAuth in progress or web flow chosen');
+            this.continueOnWeb();
+            return;
+        }
+        
         if (this.deviceLikelyHasApp()) {
             const appDetectionSection = document.getElementById('app-detection');
             const loadingSection = document.getElementById('loading');
