@@ -7,33 +7,31 @@ class YAMUAccountManagement {
     }
 
     initializeApp() {
-        // Let AuthManager handle auth state changes to prevent conflicts
-        // Just initialize the UI flow - auth state will be handled by AuthManager
-        this.checkInitialState();
-    }
-
-    checkInitialState() {
-        // Check if user is already authenticated on page load
-        // This runs after Firebase initializes
-        setTimeout(() => {
-            if (auth.currentUser) {
-                // User is already signed in
-                this.showAccountOptions();
-            } else {
-                // User is not signed in, start with app detection
-                this.startAppDetectionFlow();
-            }
-        }, 100); // Small delay to ensure Firebase is initialized
+        // Let AuthManager handle all auth state changes and UI transitions
+        // Main app only handles modal setup and global error handling
+        console.log('YAMU Account Management main app initialized');
+        
+        // Start app detection flow only if not returning from OAuth
+        if (!sessionStorage.getItem('yamuOAuthInProgress')) {
+            this.startAppDetectionFlow();
+        }
     }
 
     startAppDetectionFlow() {
-        // Start the app detection flow
-        if (window.appDetector) {
-            window.appDetector.startAppDetection();
-        } else {
-            // Fallback if app detector not loaded
-            this.showAuthSection();
-        }
+        // Start the app detection flow only if auth manager hasn't taken control
+        setTimeout(() => {
+            // Only start app detection if auth manager hasn't shown a section yet
+            const visibleSections = document.querySelectorAll('.section:not(.hidden)');
+            
+            if (visibleSections.length === 0) {
+                if (window.appDetector) {
+                    window.appDetector.startAppDetection();
+                } else {
+                    // Fallback if app detector not loaded
+                    this.showAuthSection();
+                }
+            }
+        }, 50); // Shorter delay, let auth manager take precedence
     }
 
     showAuthSection() {
